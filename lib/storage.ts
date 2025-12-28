@@ -117,11 +117,10 @@ export class StorageManager {
 
   async exportAllData(): Promise<string> {
     const snapshotsStore = await this.getStore('month_snapshots');
-    const settingsStore = await this.getStore('settings');
-    
     const snapshots: MonthSnapshot[] = await new Promise((res) => {
       snapshotsStore.getAll().onsuccess = (e) => res((e.target as any).result);
     });
+    const settingsStore = await this.getStore('settings');
     const settings: any = await new Promise((res) => {
       settingsStore.get('main_settings').onsuccess = (e) => res((e.target as any).result);
     });
