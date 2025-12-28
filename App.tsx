@@ -14,13 +14,14 @@ import GainLossPage from './pages/GainLoss.tsx';
 import LoanTrackerPage from './pages/LoanTracker.tsx';
 import PayrollSettingsPage from './pages/PayrollSettings.tsx';
 import TaxTablesPage from './pages/TaxTables.tsx';
-import { listTaxTableYears, getTaxTableSet } from './src/lib/payroll/taxTables';
-import { syncMonth, syncSettings, syncTaxTables } from './lib/supabase';
+import { listTaxTableYears, getTaxTableSet, saveTaxTableSet } from './src/lib/payroll/taxTables';
+import { getSupabase, syncMonth, syncSettings, syncTaxTables, fetchRemoteSettings, fetchRemoteMonths, fetchRemoteTaxTables } from './lib/supabase';
 
 interface AppContextType {
   settings: AppSettings;
   currentSnapshot: MonthSnapshot | null;
   setSnapshot: (s: MonthSnapshot) => void;
+  saveSnapshot: (s: MonthSnapshot) => Promise<void>;
   saveCurrentSnapshot: () => Promise<void>;
   updateSettings: (s: Partial<AppSettings>) => void;
   isLoading: boolean;
@@ -118,6 +119,10 @@ const normalizeSettings = (saved: AppSettings | null): AppSettings => {
     payroll_settings: saved?.payroll_settings || DEFAULT_SETTINGS.payroll_settings,
     last_sync_at: saved?.last_sync_at || 0,
   };
+};
+
+const hasCloudConfig = (settings: AppSettings) => {
+  return Boolean(settings.supabase_enabled && settings.supabase_url && settings.supabase_anon_key);
 };
 
 const buildDefaultMonthSetup = (
@@ -274,6 +279,36 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [currentSnapshot, setCurrentSnapshot] = useState<MonthSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [cloudGate, setCloudGate] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authStatus, setAuthStatus] = useState('');
+
+  const loadCloudData = async (baseSettings: AppSettings) => {
+    if (!hasCloudConfig(baseSettings)) return { status: 'disabled' as const };
+    const client = getSupabase(baseSettings);
+    if (!client) return { status: 'disabled' as const };
+
+    const { data: { user } } = await client.auth.getUser();
+    if (!user) return { status: 'auth-required' as const };
+
+    const remoteSettings = await fetchRemoteSettings(baseSettings);
+    const remoteMonths = await fetchRemoteMonths(baseSettings);
+    const remoteTaxTables = await fetchRemoteTaxTables(baseSettings);
+    return { status: 'ok' as const, remoteSettings, remoteMonths, remoteTaxTables };
+  };
+
+  const saveSnapshot = async (snapshot: MonthSnapshot, overrideSettings?: AppSettings) => {
+    await storage.upsertMonth(snapshot);
+    const activeSettings = overrideSettings || settings;
+    if (!hasCloudConfig(activeSettings)) return;
+    const updated = await syncMonth(snapshot, activeSettings);
+    if (updated) {
+      const normalized = normalizeMonthSnapshot(updated, activeSettings.accounts, activeSettings.categories);
+      setCurrentSnapshot(normalized);
+      await storage.upsertMonth(normalized);
+    }
+  };
 
   const initData = async () => {
     try {
@@ -282,6 +317,96 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       const monthId = savedSettings?.last_opened_month || DEFAULT_SETTINGS.last_opened_month;
       const existingMonth = await storage.getMonth(monthId);
       let normalizedSettings = normalizeSettings(savedSettings);
+      const cloudResult = await loadCloudData(normalizedSettings);
+      if (cloudResult.status === 'auth-required') {
+        setSettings(normalizedSettings);
+        setCloudGate(true);
+        setIsLoading(false);
+        return;
+      }
+      if (cloudResult.status === 'ok') {
+        let remoteSettings = cloudResult.remoteSettings;
+        let remoteMonths = cloudResult.remoteMonths;
+        const remoteTaxTables = cloudResult.remoteTaxTables;
+
+        if (!remoteSettings) {
+          await syncSettings(normalizedSettings);
+          remoteSettings = normalizedSettings;
+        }
+
+        if (remoteMonths.length === 0) {
+          const localMonthIds = await storage.listMonths();
+          if (localMonthIds.length) {
+            const localMonths = await Promise.all(localMonthIds.map(id => storage.getMonth(id)));
+            for (const local of localMonths) {
+              if (local) await syncMonth(local, normalizedSettings);
+            }
+            remoteMonths = localMonths.filter((m): m is MonthSnapshot => Boolean(m));
+          }
+        }
+
+        await storage.resetAll();
+        const normalizedRemoteSettings = normalizeSettings(remoteSettings);
+        setSettings(normalizedRemoteSettings);
+        await storage.saveSettings(normalizedRemoteSettings);
+
+        for (const snapshot of remoteMonths) {
+          await storage.upsertMonth(snapshot);
+        }
+        for (const table of remoteTaxTables) {
+          await saveTaxTableSet(table);
+        }
+
+        const availableMonthIds = remoteMonths.map(m => m.id).sort();
+        const targetMonthId = availableMonthIds.includes(normalizedRemoteSettings.last_opened_month)
+          ? normalizedRemoteSettings.last_opened_month
+          : (availableMonthIds.at(-1) || normalizedRemoteSettings.last_opened_month);
+        if (targetMonthId !== normalizedRemoteSettings.last_opened_month) {
+          normalizedRemoteSettings.last_opened_month = targetMonthId;
+          await storage.saveSettings(normalizedRemoteSettings);
+          await syncSettings(normalizedRemoteSettings);
+        }
+
+        if (availableMonthIds.length > 0) {
+          const snapshot = await storage.getMonth(targetMonthId);
+          if (snapshot) {
+            const normalized = normalizeMonthSnapshot(snapshot, normalizedRemoteSettings.accounts, normalizedRemoteSettings.categories);
+            setCurrentSnapshot(normalized);
+            await storage.upsertMonth(normalized);
+            setCloudGate(false);
+            return;
+          }
+        }
+        const newMonthId = normalizedRemoteSettings.last_opened_month || DEFAULT_SETTINGS.last_opened_month;
+        const newMonth: MonthSnapshot = {
+          id: newMonthId,
+          accounts: normalizedRemoteSettings.accounts,
+          categories: normalizedRemoteSettings.categories,
+          transactions: [],
+          starting_balances: await buildStartingBalancesFromPreviousMonth(newMonthId, normalizedRemoteSettings.accounts, normalizedRemoteSettings.categories),
+          schema_version: 6,
+          month_setup: buildDefaultMonthSetup(newMonthId, {
+            id: newMonthId,
+            accounts: normalizedRemoteSettings.accounts,
+            categories: normalizedRemoteSettings.categories,
+            transactions: [],
+            starting_balances: [],
+            schema_version: 6,
+            updated_at: Date.now(),
+            device_id: 'default'
+          }, {
+            paycheck_schedule: normalizedRemoteSettings.payroll_settings.pay_cycle,
+            paycheck_anchor_date: normalizedRemoteSettings.payroll_settings.paycheck_anchor_date || `${newMonthId}-01`,
+            paycheck_category_id: normalizedRemoteSettings.payroll_settings.paycheck_category_id || ''
+          }),
+          updated_at: Date.now(),
+          device_id: 'default'
+        };
+        setCurrentSnapshot(newMonth);
+        await saveSnapshot(newMonth, normalizedRemoteSettings);
+        setCloudGate(false);
+        return;
+      }
       if (!normalizedSettings.accounts.length) {
         normalizedSettings = {
           ...normalizedSettings,
@@ -300,7 +425,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       if (existingMonth) {
         const normalized = normalizeMonthSnapshot(existingMonth, normalizedSettings.accounts, normalizedSettings.categories);
         setCurrentSnapshot(normalized);
-        await storage.upsertMonth(normalized);
+        await saveSnapshot(normalized, normalizedSettings);
       } else {
         const newMonth: MonthSnapshot = {
           id: monthId,
@@ -327,7 +452,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
           device_id: 'default'
         };
         setCurrentSnapshot(newMonth);
-        await storage.upsertMonth(newMonth);
+        await saveSnapshot(newMonth, normalizedSettings);
       }
     } catch (e) {
       console.error(e);
@@ -343,7 +468,7 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     if (month) {
       const normalized = normalizeMonthSnapshot(month, accounts, categories);
       setCurrentSnapshot(normalized);
-      await storage.upsertMonth(normalized);
+      await saveSnapshot(normalized);
     } else {
       const newMonth: MonthSnapshot = {
         id: monthId,
@@ -370,14 +495,14 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
         device_id: 'default'
       };
       setCurrentSnapshot(newMonth);
-      await storage.upsertMonth(newMonth);
+      await saveSnapshot(newMonth);
     }
   };
 
   const saveCurrentSnapshot = async () => {
     if (currentSnapshot) {
       const updated = { ...currentSnapshot, updated_at: Date.now() };
-      await storage.upsertMonth(updated);
+      await saveSnapshot(updated);
       setCurrentSnapshot(updated);
     }
   };
@@ -386,17 +511,28 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const updated = { ...settings, ...newSettings, updated_at: Date.now() };
     setSettings(updated);
     await storage.saveSettings(updated);
+
+    let activeSettings = updated;
+    if (hasCloudConfig(updated)) {
+      const remoteSettings = await syncSettings(updated);
+      if (remoteSettings) {
+        activeSettings = normalizeSettings(remoteSettings);
+        setSettings(activeSettings);
+        await storage.saveSettings(activeSettings);
+      }
+    }
+
     if ((newSettings.accounts || newSettings.categories) && currentSnapshot) {
       const normalized = normalizeMonthSnapshot(
         currentSnapshot,
-        newSettings.accounts || settings.accounts,
-        newSettings.categories || settings.categories
+        newSettings.accounts || activeSettings.accounts,
+        newSettings.categories || activeSettings.categories
       );
       setCurrentSnapshot(normalized);
-      await storage.upsertMonth(normalized);
+      await saveSnapshot(normalized);
     }
     if (newSettings.last_opened_month) {
-      await loadMonth(newSettings.last_opened_month, updated.accounts, updated.categories);
+      await loadMonth(newSettings.last_opened_month, activeSettings.accounts, activeSettings.categories);
     }
   };
 
@@ -404,15 +540,41 @@ const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     initData();
   }, []);
 
+  const handleCloudSignIn = async () => {
+    if (!authEmail || !authPassword) {
+      setAuthStatus('Enter email and password.');
+      return;
+    }
+    const client = getSupabase(settings);
+    if (!client) {
+      setAuthStatus('Supabase not configured.');
+      return;
+    }
+    setAuthStatus('Signing in...');
+    const { error } = await client.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword
+    });
+    if (error) {
+      setAuthStatus('Sign-in failed.');
+      return;
+    }
+    setAuthStatus('Signed in. Loading data...');
+    setCloudGate(false);
+    setIsLoading(true);
+    await initData();
+  };
+
   const value = useMemo(() => ({
     settings,
     currentSnapshot,
     setSnapshot: setCurrentSnapshot,
+    saveSnapshot,
     saveCurrentSnapshot,
     updateSettings,
     isLoading,
     refreshSnapshot: () => { if (currentSnapshot) loadMonth(currentSnapshot.id); }
-  }), [settings, currentSnapshot, isLoading]);
+  }), [settings, currentSnapshot, isLoading, saveSnapshot, updateSettings]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
@@ -490,6 +652,47 @@ const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       refreshSyncStatus();
     }
   };
+
+  if (cloudGate) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white p-6">
+        <div className="bg-slate-800 border border-slate-700 rounded-2xl p-6 w-full max-w-md space-y-4">
+          <h1 className="text-xl font-bold">Cloud sign-in required</h1>
+          <p className="text-sm text-slate-300">
+            This app is configured to load from Supabase before continuing.
+          </p>
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase text-slate-400">Email</label>
+            <input
+              type="email"
+              value={authEmail}
+              onChange={(e) => setAuthEmail(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-slate-900"
+              placeholder="you@example.com"
+            />
+          </div>
+          <div className="space-y-2">
+            <label className="text-xs font-bold uppercase text-slate-400">Password</label>
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(e) => setAuthPassword(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-slate-900"
+              placeholder="Password"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={handleCloudSignIn}
+            className="w-full bg-blue-500 hover:bg-blue-400 text-white font-bold py-2 rounded-lg"
+          >
+            Sign In
+          </button>
+          {authStatus && <div className="text-xs text-slate-300">{authStatus}</div>}
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) return <div className="flex items-center justify-center h-full">Loading storage...</div>;
 
