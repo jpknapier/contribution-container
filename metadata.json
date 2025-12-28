@@ -1,0 +1,5 @@
+{
+  "name": "CashForecaster v1",
+  "description": "A local-first, privacy-focused personal cash forecasting tool that tracks your projected bank balances using IndexedDB and optional Supabase cloud sync.",
+  "requestFramePermissions": []
+}

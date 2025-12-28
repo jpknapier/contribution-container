@@ -1,0 +1,141 @@
+{
+  "tax_year": 2026,
+  "schema_version": 1,
+  "federal_income_tax_brackets": {
+    "single": [
+      {
+        "lowerBound": 0,
+        "upperBound": 12400,
+        "rate": 0.1
+      },
+      {
+        "lowerBound": 12400,
+        "upperBound": 50400,
+        "rate": 0.12
+      },
+      {
+        "lowerBound": 50400,
+        "upperBound": 105700,
+        "rate": 0.22
+      },
+      {
+        "lowerBound": 105700,
+        "upperBound": 201775,
+        "rate": 0.24
+      },
+      {
+        "lowerBound": 201775,
+        "upperBound": 256225,
+        "rate": 0.32
+      },
+      {
+        "lowerBound": 256225,
+        "upperBound": 640600,
+        "rate": 0.35
+      },
+      {
+        "lowerBound": 640600,
+        "upperBound": null,
+        "rate": 0.37
+      }
+    ],
+    "married_joint": [
+      {
+        "lowerBound": 0,
+        "upperBound": 24800,
+        "rate": 0.1
+      },
+      {
+        "lowerBound": 24800,
+        "upperBound": 100800,
+        "rate": 0.12
+      },
+      {
+        "lowerBound": 100800,
+        "upperBound": 211400,
+        "rate": 0.22
+      },
+      {
+        "lowerBound": 211400,
+        "upperBound": 403550,
+        "rate": 0.24
+      },
+      {
+        "lowerBound": 403550,
+        "upperBound": 512450,
+        "rate": 0.32
+      },
+      {
+        "lowerBound": 512450,
+        "upperBound": 768700,
+        "rate": 0.35
+      },
+      {
+        "lowerBound": 768700,
+        "upperBound": null,
+        "rate": 0.37
+      }
+    ],
+    "head_of_household": [
+      {
+        "lowerBound": 0,
+        "upperBound": 17700,
+        "rate": 0.1
+      },
+      {
+        "lowerBound": 17700,
+        "upperBound": 67450,
+        "rate": 0.12
+      },
+      {
+        "lowerBound": 67450,
+        "upperBound": 105700,
+        "rate": 0.22
+      },
+      {
+        "lowerBound": 105700,
+        "upperBound": 201750,
+        "rate": 0.24
+      },
+      {
+        "lowerBound": 201750,
+        "upperBound": 256200,
+        "rate": 0.32
+      },
+      {
+        "lowerBound": 256200,
+        "upperBound": 640600,
+        "rate": 0.35
+      },
+      {
+        "lowerBound": 640600,
+        "upperBound": null,
+        "rate": 0.37
+      }
+    ]
+  },
+  "standard_deduction": {
+    "single": 16100,
+    "married_joint": 32200,
+    "head_of_household": 24150
+  },
+  "dependent_credit": {
+    "per_dependent_credit_amount": 2200
+  },
+  "federal_supplemental_withholding_rate": 0.22,
+  "fica": {
+    "ss_rate": 0.062,
+    "medicare_rate": 0.0145,
+    "ss_wage_base": 184500,
+    "additional_medicare_rate": 0.009,
+    "additional_medicare_threshold": {
+      "single": 200000,
+      "married_joint": 250000,
+      "head_of_household": 200000
+    }
+  },
+  "retirement": {
+    "k401_employee_max": 24500,
+    "k401_catch_up_max": 8000
+  }
+}

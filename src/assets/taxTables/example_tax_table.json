@@ -1,0 +1,43 @@
+{
+  "tax_year": 2099,
+  "schema_version": 1,
+  "updated_at": 0,
+  "federal_income_tax_brackets": {
+    "single": [
+      { "lowerBound": 0, "upperBound": 50000, "rate": 0.1 },
+      { "lowerBound": 50000, "upperBound": null, "rate": 0.2 }
+    ],
+    "married_joint": [
+      { "lowerBound": 0, "upperBound": 100000, "rate": 0.1 },
+      { "lowerBound": 100000, "upperBound": null, "rate": 0.2 }
+    ],
+    "head_of_household": [
+      { "lowerBound": 0, "upperBound": 75000, "rate": 0.1 },
+      { "lowerBound": 75000, "upperBound": null, "rate": 0.2 }
+    ]
+  },
+  "standard_deduction": {
+    "single": 10000,
+    "married_joint": 20000,
+    "head_of_household": 15000
+  },
+  "dependent_credit": {
+    "per_dependent_credit_amount": 500
+  },
+  "federal_supplemental_withholding_rate": 0.15,
+  "fica": {
+    "ss_rate": 0.062,
+    "medicare_rate": 0.0145,
+    "ss_wage_base": 100000,
+    "additional_medicare_rate": 0.009,
+    "additional_medicare_threshold": {
+      "single": 200000,
+      "married_joint": 250000,
+      "head_of_household": 200000
+    }
+  },
+  "retirement": {
+    "k401_employee_max": 20000,
+    "k401_catch_up_max": 6500
+  }
+}
