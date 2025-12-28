@@ -7,7 +7,7 @@ import { Account, AccountType, Category, CategoryType, Loan, RecurringItem, Recu
 import { Button } from '../components/Button';
 
 const SettingsPage: React.FC = () => {
-  const { settings, updateSettings, currentSnapshot, refreshSnapshot } = useApp();
+  const { settings, updateSettings, currentSnapshot, refreshSnapshot, saveSnapshot } = useApp();
   const [syncStatus, setSyncStatus] = useState<string>('Idle');
   const [authStatus, setAuthStatus] = useState<string>('Signed out');
   const [authEmail, setAuthEmail] = useState<string>('');
@@ -187,7 +187,7 @@ const SettingsPage: React.FC = () => {
     if (currentSnapshot?.month_setup) {
       const filtered = currentSnapshot.month_setup.variable_overrides.filter(o => o.item_id !== id);
       const updatedSnapshot = { ...currentSnapshot, month_setup: { ...currentSnapshot.month_setup, variable_overrides: filtered }, updated_at: Date.now(), schema_version: 6 };
-      await storage.upsertMonth(updatedSnapshot);
+      await saveSnapshot(updatedSnapshot);
       refreshSnapshot();
     }
   };
