@@ -144,8 +144,10 @@ export class StorageManager {
   async resetAll(): Promise<void> {
     const snapshotsStore = await this.getStore('month_snapshots', 'readwrite');
     const settingsStore = await this.getStore('settings', 'readwrite');
+    const taxTablesStore = await this.getStore('tax_tables', 'readwrite');
     snapshotsStore.clear();
     settingsStore.clear();
+    taxTablesStore.clear();
   }
 }
 

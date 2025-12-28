@@ -16,6 +16,71 @@ export function getSupabase(settings: AppSettings) {
   return null;
 }
 
+export async function fetchRemoteSettings(settings: AppSettings): Promise<AppSettings | null> {
+  const client = getSupabase(settings);
+  if (!client) return null;
+
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return null;
+
+  const { data, error } = await client
+    .from('settings')
+    .select('*')
+    .eq('user_id', user.id)
+    .single();
+
+  if (error && error.code !== 'PGRST116') {
+    console.error("Settings fetch error", error);
+    return null;
+  }
+
+  return data?.settings as AppSettings || null;
+}
+
+export async function fetchRemoteMonths(settings: AppSettings): Promise<MonthSnapshot[]> {
+  const client = getSupabase(settings);
+  if (!client) return [];
+
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await client
+    .from('months')
+    .select('*')
+    .eq('user_id', user.id);
+
+  if (error) {
+    console.error("Months fetch error", error);
+    return [];
+  }
+
+  return (data || []).map((row: any) => row.snapshot as MonthSnapshot);
+}
+
+export async function fetchRemoteTaxTables(settings: AppSettings): Promise<TaxTableSet[]> {
+  const client = getSupabase(settings);
+  if (!client) return [];
+
+  const { data: { user } } = await client.auth.getUser();
+  if (!user) return [];
+
+  const { data, error } = await client
+    .from('tax_tables')
+    .select('*')
+    .eq('user_id', user.id);
+
+  if (error) {
+    console.error("Tax table fetch error", error);
+    return [];
+  }
+
+  return (data || []).map((row: any) => ({
+    ...row.tax_table,
+    tax_year: row.tax_year,
+    updated_at: row.updated_at || row.tax_table?.updated_at || Date.now()
+  })) as TaxTableSet[];
+}
+
 export async function syncMonth(snapshot: MonthSnapshot, settings: AppSettings): Promise<MonthSnapshot | null> {
   const client = getSupabase(settings);
   if (!client) return null;
